@@ -1,59 +1,59 @@
 from pytube import YouTube, Playlist
 
-import tkinter as tk
-from threading import Thread
-from tkinter import messagebox, scrolledtext
-import os
+import time
+from tqdm import tqdm
 
-def download_video():
-    url = url_entry.get()
-    formato = formato_var.get()
-    # Remove a entrada do caminho, pois agora é fixo
-    path = os.path.join(os.path.expanduser("~"), "Downloads", "youtube_saves")
-    
-    if not url:
-        messagebox.showerror("Erro", "Por favor, preencha todos os campos")
-        return
-    if not formato:
-        messagebox.showerror("Erro", "Selecione o formato do arquivo")
-        return
-
-    output.insert(tk.END, "Iniciando o download...\n")
-    output.see(tk.END)
-
-    # Cria a pasta se não existir
-    if not os.path.exists(path):
-        os.makedirs(path)
-    
-    formato_video_audio = formato == 'MP4'
-    thread = Thread(target=lambda: iniciar_download(url, formato_video_audio, path))
-    thread.start()
-
-def iniciar_download(url, formato_video_audio, path):
-    try:
-        tipo_url = verificar_tipo_url(url)
-        if tipo_url == "Video_Unico":
-            video = YouTube(url)
-            video.register_on_progress_callback(lambda stream, chunk, bytes_remaining: progress_update(stream, bytes_remaining))
-            stream = video.streams.filter(file_extension='mp4', progressive=True)[-1] if formato_video_audio else video.streams.filter(file_extension='mp4', only_audio=True)[-1]
-            stream.download(output_path=path)
-        elif tipo_url == "Playlist":
-            playlist = Playlist(url)
-            for video in playlist.videos:
-                video.register_on_progress_callback(lambda stream, chunk, bytes_remaining: progress_update(stream, bytes_remaining))
-                stream = video.streams.filter(file_extension='mp4', progressive=True)[-1] if formato_video_audio else video.streams.filter(file_extension='mp4', only_audio=True)[-1]
-                stream.download(output_path=path)
-        output.insert(tk.END, "Download concluído com sucesso!\n")
-    except Exception as e:
-        output.insert(tk.END, f"Erro durante o download: {str(e)}\n")
-    output.see(tk.END)
-
-def progress_update(stream, bytes_remaining):
+def progress_function(stream, chunk, bytes_remaining):
     total_size = stream.filesize
     bytes_downloaded = total_size - bytes_remaining
-    percent = int((bytes_downloaded / total_size) * 100)
-    output.insert(tk.END, f"Download progress: {percent}%\n")
-    output.see(tk.END)
+    progress = int((bytes_downloaded / total_size) * 100)
+    bar.update(progress - bar.n)
+
+def atributos_video(stream):
+    print("Atributos do Stream:".center(50, '*'))
+    print(f"Resolução: {stream.resolution}")
+    print(f"Codec de Áudio: {stream.audio_codec}")
+    print(f"Tipo de Stream: {stream.type}")
+    print(f"Taxa de Bits de Áudio: {stream.abr}")
+    print(f"Tamanho: {str(round(stream.filesize / 1024 / 1024, 2))} MB")  # filesize returns bytes
+    print('*' * 50)
+
+def download(video, formato_video_audio, caminho_salvar_arquivo, bar):
+    if formato_video_audio:
+        stream = video.streams.filter(file_extension='mp4', progressive=True)[-1]
+    else:
+        stream = video.streams.filter(file_extension='mp4', only_audio=True)[-1]
+
+    max_tentativas = 5
+    tentativa_atual = 0
+    while tentativa_atual < max_tentativas:
+        try:
+            stream.download(output_path=caminho_salvar_arquivo)
+            atributos_video(stream)
+            break
+        except Exception as e:
+            tentativa_atual += 1
+            print(f"Falha no download: {e}. Tentativa {tentativa_atual} de {max_tentativas}.")
+            time.sleep(5)
+
+def download_only(video_url, formato_video_audio, caminho_salvar_arquivo):
+    video = YouTube(video_url)
+    print(video.title)
+    bar = tqdm(total=100, desc='Loading', unit='%', leave=True)
+    video.register_on_progress_callback(progress_function)
+    download(video, formato_video_audio, caminho_salvar_arquivo, bar)
+    bar.close()
+
+def download_playlist(playlist_url, formato_video_audio, caminho_salvar_arquivo):
+    playlist = Playlist(playlist_url)
+    print(playlist.title)
+    print('Quantidade:', len(playlist.videos))
+    for video in playlist.videos:
+        print(video.title)
+        bar = tqdm(total=100, desc='Loading', unit='%', leave=True)
+        video.register_on_progress_callback(progress_function)
+        download(video, formato_video_audio, caminho_salvar_arquivo, bar)
+        bar.close()
 
 def verificar_tipo_url(url):
     if 'playlist?list=' in url or 'list=' in url:
@@ -63,41 +63,26 @@ def verificar_tipo_url(url):
     else:
         return "URL não reconhecida"
 
-root = tk.Tk()
-root.title("YouTube Downloader")
+def main():
+    video_url = input('Cole a URL e pressione Enter: ')
+    escolha = input('Download mp3 ou mp4?: ').lower()
+    formato_video_audio = True if escolha == 'mp4' else False if escolha == 'mp3' else None
+    if formato_video_audio is None:
+        print('Formato Inválido. Aceito apenas "mp3" ou "mp4".')
+        return
 
-# configurando largura e altura do programa e para abrir no meio exato da tela
-#master.geometry("400x100")
-width = 400 #1920
-height = 300 #1080
-screen_width = root.winfo_screenwidth()
-screen_height = root.winfo_screenheight()
-center_x = int((screen_width - width) / 2)
-center_y = int((screen_height - height) / 2)
-root.geometry(f'{width}x{height}+{center_x}+{center_y}')
+    caminho_salvar_arquivo = input('Onde gostaria que fosse colocado o download?: ').replace('\\', '/')
 
-# Entrada de URL
-tk.Label(root, text="URL do Vídeo/Playlist:").pack()
-url_entry = tk.Entry(root, width=50)
-url_entry.pack()
+    tipo_url = verificar_tipo_url(video_url)
+    if tipo_url == "Video_Unico":
+        download_only(video_url, formato_video_audio, caminho_salvar_arquivo)
+    elif tipo_url == "Playlist":
+        download_playlist(video_url, formato_video_audio, caminho_salvar_arquivo)
+    else:
+        print("URL não reconhecida.")
 
-# Entrada de formato
-formato_var = tk.StringVar()
-tk.Label(root, text="Formato do download:").pack()
-tk.Radiobutton(root, text="MP4 (Vídeo)", variable=formato_var, value='MP4').pack()
-tk.Radiobutton(root, text="MP3 (Áudio)", variable=formato_var, value='MP3').pack()
+    print('Download(s) Concluído(s)')
+    input("Pressione Enter para encerrar...")
 
-# Remove a entrada do caminho para salvar
-# tk.Label(root, text="Caminho para salvar o arquivo:").pack()
-# path_entry = tk.Entry(root, width=50)
-# path_entry.pack()
-
-# Botão de download
-download_button = tk.Button(root, text="Download", command=download_video)
-download_button.pack()
-
-# Área de saída de logs
-output = scrolledtext.ScrolledText(root, height=10)
-output.pack()
-
-root.mainloop()
+if __name__ == "__main__":
+    main()
